@@ -2,7 +2,7 @@
 venv/
 __pycache__/
 *.pyc
-/packages
+packages/
 
 temp_clean_output/
 derby.log
