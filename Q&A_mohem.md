@@ -11,17 +11,18 @@
 *   **Selection**: We generated all possible permutations from our frequent itemsets and kept only those where the **Confidence > Minimum Threshold**.
 
 ### 3. How did we choose our Minimum Support Threshold (0.05)?
-*   **Reasoning**: This dataset (`Market_Basket_Optimisation`) is **sparse** (contains many different items like 'shrimp', 'corn', 'napkins' that don't appear in every single cart).
-*   **Decision**: 
-    *   If we set it too high (e.g., 0.5 or 50%), we would find **Zero** patterns (no item appears in 50% of baskets).
-    *   We chose **0.05 (5%)** to ensure we capture items that appear reasonably often (at least 375 times out of 7500 transactions) without getting too much "noise".
+*   **In Exams (Like the Image)**: The teacher gives you a high number (e.g., 40%) because the dataset is tiny (5 rows). If you used 5% on 5 rows, everything would be a pattern!
+*   **In Our Project**: **WE chose it.**
+    *   **Reasoning**: Our dataset has **7,500 transactions**.
+    *   If we used 40% (like the slide), an item would need to appear 3,000 times! almost nothing is bought that often.
+    *   We chose **0.05 (5%)** so we capture items bought at least 375 times. It's a "Data-Driven" decision based on the dataset size.
 
 ### 4. How did we choose the Minimum Confidence Threshold (0.2)?
-*   **Reasoning**: We wanted to find rules that are likely to happen, but not be too restrictive.
-*   **Decision**: 
+*   **In Exams**: Given by the professor to ensure everyone gets the same answer.
+*   **In Our Project**: **WE chose it via Trial & Error.**
     *   We started with **0.2 (20%)**.
-    *   This means "If a customer buys X, there is at least a 20% chance they will buy Y".
-    *   This is a standard starting point for retail datasets. If we set it to 0.8 (80%), we might miss valuable but slightly less obvious patterns.
+    *   **Why?**: Retail data is "noisy". Human behavior is unpredictable. A 20% consistent pattern is actually quite strong in a grocery store.
+    *   If we set it to 70% (like the slide), we found **Zero Rules**. So we lowered it until valid patterns emerged.
 
 ### 5. Why do we sort the final results by "Lift"?
 *   **Reasoning**: 
