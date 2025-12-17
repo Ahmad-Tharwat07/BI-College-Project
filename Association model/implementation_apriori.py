@@ -10,6 +10,7 @@ import time
 import pandas as pd
 from mlxtend.preprocessing import TransactionEncoder
 from mlxtend.frequent_patterns import fpgrowth
+import sys
 
 # ==========================================
 # 1. SETTINGS & DATASET
@@ -21,6 +22,38 @@ RESULTS_DIR = "results"
 
 if not os.path.exists(RESULTS_DIR):
     os.makedirs(RESULTS_DIR)
+
+# --- Logging Helper ---
+class Tee:
+    """Duplicate stdout to a file."""
+    def __init__(self, name, mode):
+        self.file = open(name, mode)
+        self.stdout = sys.stdout
+        sys.stdout = self
+
+    def write(self, data):
+        self.file.write(data)
+        self.stdout.write(data)
+
+    def flush(self):
+        self.file.flush()
+        self.stdout.flush()
+
+    def close(self):
+        if sys.stdout is self:
+            sys.stdout = self.stdout
+        self.file.close()
+
+def get_unique_filename(base_name, ext):
+    """Returns output.txt, output1.txt, output2.txt..."""
+    counter = 0
+    while True:
+        suffix = str(counter) if counter > 0 else ""
+        filename = f"{base_name}{suffix}{ext}"
+        full_path = os.path.join(RESULTS_DIR, filename)
+        if not os.path.exists(full_path):
+            return full_path
+        counter += 1
 
 def load_dataset_from_csv(filename):
     """
@@ -41,6 +74,63 @@ def load_dataset_from_csv(filename):
                 dataset.append(clean_row)
     print(f"✅ Loaded {len(dataset)} transactions.")
     return dataset
+
+# ... (Previous Code) ...
+
+# ==========================================
+# 6. VISUALIZATION & SAVING
+# ==========================================
+
+def plot_fpgrowth_freq_items(frequent_items_list):
+    """
+    Plots Top 10 Frequent Itemsets from FP-Growth by Support.
+    frequent_items_list: list of (tuple_itemset, support)
+    """
+    if not frequent_items_list:
+        return
+
+    # Sort by support descending
+    sorted_items = sorted(frequent_items_list, key=lambda x: x[1], reverse=True)
+    top_items = sorted_items[:10]
+
+    names = [str(item[0]) for item in top_items]
+    supports = [item[1] for item in top_items]
+
+    plt.figure(figsize=(12, 6))
+    plt.barh(names, supports, color='#4ECDC4') # Teal color for FP-Growth
+    plt.xlabel('Support')
+    plt.title('Top 10 Frequent Itemsets (FP-Growth)')
+    plt.gca().invert_yaxis()
+    plt.tight_layout()
+
+    filename = os.path.join(RESULTS_DIR, "fpgrowth_top_items_support.png")
+    plt.savefig(filename)
+    print(f"\n💾 Saved FP-Growth Plot to: {filename}")
+    # plt.show() # Disabled popup
+
+def plot_rules_and_save(rules):
+    if not rules:
+        return
+
+    top_rules = rules[:10]
+    names = [r['rule'] for r in top_rules]
+    confidences = [r['confidence'] for r in top_rules]
+
+    plt.figure(figsize=(12, 6))
+    plt.barh(names, confidences, color='skyblue')
+    plt.xlabel('Confidence')
+    plt.title('Top 10 Strongest Rules (Apriori)')
+    plt.gca().invert_yaxis()
+    plt.tight_layout()
+
+    filename = os.path.join(RESULTS_DIR, "top_rules_confidence.png")
+    plt.savefig(filename)
+    print(f"\n💾 Saved Rule Plot to: {filename}")
+    # plt.show()
+
+# ... (Previous Plot Comparison) ...
+
+
 
 # ==========================================
 # 2. HELPER FUNCTIONS (Apriori Scratch)
@@ -91,22 +181,38 @@ def run_apriori_scratch(dataset, min_support):
     # Phase 2: Frequent k=2+
     k = 2
     while True:
-        if len(current_frequent_items) == 0:
+        # Check if we have any frequent itemsets from the previous layer
+        if not current_frequent_items:
             break
 
+        # 1. Get all unique items from the current frequent itemsets (Survivors)
         unique_items_in_layer = set()
         for itemset in current_frequent_items:
             for item in itemset:
                 unique_items_in_layer.add(item)
-        sorted_pool = sorted(list(unique_items_in_layer))
-        candidates = list(itertools.combinations(sorted_pool, k))
+
+        # We need a list to generate combinations.
+        # (Converting to sorted list ensures (A,B) and (B,A) are treated as the same set {A,B})
+        pool_of_items = sorted(list(unique_items_in_layer))
+
+        # 2. Generate Candidates of size k from these items
+        # "Naive" approach: Just make all combinations of size k from the survivors' items
+        candidates = list(itertools.combinations(pool_of_items, k))
+
+        if not candidates:
+            break
+
+        print(f"\n🔎 Checking {len(candidates)} Candidates for k={k}...")
 
         new_frequent_layer = []
 
+        # Prepare table header
         print(f"\n📋 TABLE: Frequent {k}-Itemsets")
         print(f"{'Itemset':<40} | {'Support':<10}")
         print("-" * 55)
 
+        # 3. Check Support for each candidate
+        # Only print if it passes the minimum support (Survives)
         for candidate in candidates:
             support = calculate_support(candidate, dataset)
             if support >= min_support:
@@ -114,11 +220,14 @@ def run_apriori_scratch(dataset, min_support):
                 all_frequent_itemsets.append((candidate, support))
                 print(f"{str(candidate):<40} | {support:.4f}")
 
+        # 4. If no new frequent itemsets found, stop
         if not new_frequent_layer:
-            print("[No more frequent itemsets found]")
+            print(f"[No frequent itemsets found for k={k}]")
             break
 
         print(f"✅ Found {len(new_frequent_layer)} frequent {k}-itemsets.")
+
+        # 5. Move to next k
         current_frequent_items = new_frequent_layer
         k += 1
 
@@ -138,8 +247,28 @@ def run_fpgrowth_library(dataset, min_support):
     df = pd.DataFrame(te_ary, columns=te.columns_)
     frequent_sets_fp = fpgrowth(df, min_support=min_support, use_colnames=True)
     duration = time.time() - start_time
+
+    # Print results in a similar table format to Apriori
+    print(f"\n📋 TABLE: FP-Growth Frequent Itemsets")
+    print(f"{'Itemset':<40} | {'Support':<10}")
+    print("-" * 55)
+
+    # Sort for cleaner display: by length then support
+    frequent_sets_fp['length'] = frequent_sets_fp['itemsets'].apply(lambda x: len(x))
+    frequent_sets_fp = frequent_sets_fp.sort_values(by=['length', 'support'], ascending=[True, False])
+
+    for _, row in frequent_sets_fp.iterrows():
+        itemset_tuple = tuple(sorted(list(row['itemsets'])))
+        print(f"{str(itemset_tuple):<40} | {row['support']:.4f}")
+
     print(f"✅ FP-Growth (Library) finished in {duration:.4f} seconds.")
-    return frequent_sets_fp, duration
+
+    # Return formatted list of tuples to match Apriori logic
+    converted_results = []
+    for _, row in frequent_sets_fp.iterrows():
+        converted_results.append((tuple(row['itemsets']), row['support']))
+
+    return converted_results, duration
 
 # ==========================================
 # 5. GENERATE RULES (Manual)
@@ -220,7 +349,7 @@ def plot_rules_and_save(rules):
     filename = os.path.join(RESULTS_DIR, "top_rules_confidence.png")
     plt.savefig(filename)
     print(f"\n💾 Saved Rule Plot to: {filename}")
-    plt.show()
+    # # plt.show()
 
 def plot_comparison_and_save(t_apriori, t_fpgrowth):
     algorithms = ['Apriori (Scratch)', 'FP-Growth (Lib)']
@@ -241,44 +370,57 @@ def plot_comparison_and_save(t_apriori, t_fpgrowth):
     filename = os.path.join(RESULTS_DIR, "performance_comparison.png")
     plt.savefig(filename)
     print(f"� Saved Comparison Plot to: {filename}")
-    plt.show()
+    # # plt.show()
 
 # ==========================================
 # 7. MAIN EXECUTION
 # ==========================================
 if __name__ == "__main__":
-    # 1. Load Data
-    data = load_dataset_from_csv(CSV_FILE)
+    # 0. Setup Logging
+    log_file_path = get_unique_filename("output", ".txt")
+    logger = Tee(log_file_path, "w")
 
-    # 2. Run Apriori (Scratch)
-    freq_items_ap, time_ap = run_apriori_scratch(data, MIN_SUPPORT)
+    try:
+        print(f"📄 Logging output to: {log_file_path}")
 
-    # 3. Reference: Run FP-Growth (Library) for comparison
-    freq_items_fp, time_fp = run_fpgrowth_library(data, MIN_SUPPORT)
+        # 1. Load Data
+        data = load_dataset_from_csv(CSV_FILE)
 
-    # 4. Generate Rules (using Apriori results)
-    final_rules = generate_rules(freq_items_ap, data, MIN_CONFIDENCE)
+        # 2. Run FP-Growth (Library) First (as requested)
+        freq_items_fp, time_fp = run_fpgrowth_library(data, MIN_SUPPORT)
 
-    # 5. Visualizations
-    plot_rules_and_save(final_rules)
-    plot_comparison_and_save(time_ap, time_fp)
+        # Plot FP-Growth Results
+        plot_fpgrowth_freq_items(freq_items_fp)
 
-    # 6. Final Recommendation
-    print("\n" + "="*50)
-    print("🏆 FINAL RECOMMENDATION")
-    print("="*50)
+        # 3. Run Apriori (Scratch)
+        freq_items_ap, time_ap = run_apriori_scratch(data, MIN_SUPPORT)
 
-    speedup = time_ap / time_fp
-    print(f"Metrics Used: Execution Time & Scalability")
-    print(f"1. Apriori Time:   {time_ap:.4f}s")
-    print(f"2. FP-Growth Time: {time_fp:.4f}s")
-    print(f"⚡ Speedup Factor: FP-Growth is {speedup:.2f}x faster!")
+        # 4. Generate Rules (using Apriori results)
+        final_rules = generate_rules(freq_items_ap, data, MIN_CONFIDENCE)
 
-    if time_fp < time_ap:
-        print("\n✅ RESULT: We recommend **FP-Growth**.")
-        print("   Reason: It is significantly faster because it avoids Candidate Generation")
-        print("   and uses an efficient FP-Tree structure, requiring only 2 passes over the data.")
-    else:
-        print("\n✅ RESULT: Apriori was faster (likely due to small dataset overhead).")
+        # 5. Visualizations
+        plot_rules_and_save(final_rules)
+        plot_comparison_and_save(time_ap, time_fp)
 
-    print("\n✅ Analysis Complete. Check the 'results' folder for images.")
+        # 6. Final Recommendation
+        print("\n" + "="*50)
+        print("🏆 FINAL RECOMMENDATION")
+        print("="*50)
+
+        speedup = time_ap / time_fp
+        print(f"Metrics Used: Execution Time & Scalability")
+        print(f"1. Apriori Time:   {time_ap:.4f}s")
+        print(f"2. FP-Growth Time: {time_fp:.4f}s")
+        print(f"⚡ Speedup Factor: FP-Growth is {speedup:.2f}x faster!")
+
+        if time_fp < time_ap:
+            print("\n✅ RESULT: We recommend **FP-Growth**.")
+            print("   Reason: It is significantly faster because it avoids Candidate Generation")
+            print("   and uses an efficient FP-Tree structure, requiring only 2 passes over the data.")
+        else:
+            print("\n✅ RESULT: Apriori was faster (likely due to small dataset overhead).")
+
+        print("\n✅ Analysis Complete. Check the 'results' folder for images.")
+
+    finally:
+        logger.close()
